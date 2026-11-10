@@ -1,33 +1,28 @@
 # Bot de Telegram E-commerce en Vercel
 
-Adaptación del repositorio `raulpy271/telegram_ecommerce` para procesar actualizaciones con webhook en una función serverless.
+Adaptación de `raulpy271/telegram_ecommerce` para procesar actualizaciones mediante webhook en una Vercel Python Function.
 
-## Variables de entorno
-Configura en Vercel como variables privadas:
-- `BOT_TOKEN`: token de tu bot creado con @BotFather.
-- `TELEGRAM_WEBHOOK_SECRET`: secreto aleatorio largo (solo letras, números, `_` o `-`).
-- `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`: credenciales de tu proyecto Supabase (conexión PostgreSQL).
-- `DB_PORT`: opcional; si se omite o está vacío, el código usa `5432` para PostgreSQL. Si eliges el pooler de transacciones de Supabase, usa el puerto que muestra Supabase (a menudo `6543`).
-- `DB_DIALECT`: opcional; por defecto `postgresql`. Solo define `mysql` si conectas una base MySQL.
-- `DB_SSLMODE`: opcional; por defecto `require` para cifrar la conexión PostgreSQL.
-- `ADMINS`: usernames de administradores separados por comas.
-- `PROVIDER_TOKEN`: opcional, para pagos de Telegram.
+## Secretos: nunca dentro del código
+No incluyas tokens o contraseñas en archivos Python, README, GitHub ni en el chat. Cifrar un secreto dentro del mismo código/repositorio no lo protege: quien vea el código puede recuperar el valor o la clave. Configura todos los secretos en Vercel → Project → Settings → Environment Variables, marcados como Sensitive/Encrypted:
 
-No subas `.env` ni tokens al repositorio. La conexión se construye con `SQLAlchemy URL.create`, que escapa correctamente usuario/contraseña; el puerto se convierte a entero y usa `5432` si falta o está vacío. Para Supabase usa el host, puerto, base de datos y usuario indicados en **Project Settings → Database → Connection string**. Ejecuta `alembic upgrade head` en la base administrada antes de iniciar el bot. La migración del índice FULLTEXT solo se ejecuta en MySQL; la búsqueda ahora funciona en PostgreSQL y MySQL.
+- `TELEGRAM_BOT_TOKEN`: token de @BotFather. Por compatibilidad, el código también reconoce `BOT_TOKEN` y `botmetatron`.
+- `TELEGRAM_WEBHOOK_SECRET`: valor aleatorio (1–256 caracteres, solo A–Z, a–z, 0–9, `_` o `-`). Es obligatorio para aceptar POST.
+- `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`: credenciales Supabase PostgreSQL.
+- `DB_PORT`: puerto de Supabase; si se omite o está vacío, PostgreSQL usa `5432`.
+- Opcionales: `DB_DIALECT=postgresql`, `DB_SSLMODE=require`, `ADMINS` y `PROVIDER_TOKEN`.
 
-## Publicar
-1. Importa este repositorio en Vercel y despliega.
-2. Configura las variables de entorno y vuelve a desplegar.
-3. En Telegram Bot API, llama a `setWebhook` con `url=https://TU-DOMINIO/api` y `secret_token` igual a `TELEGRAM_WEBHOOK_SECRET`. Usa una herramienta segura y no compartas la URL con el token del bot.
-4. En Vercel, `api/index.py` se publica directamente en la ruta `/api`; no uses la raíz del dominio ni `/api/webhook`. Comprueba con `https://TU-DOMINIO/api` que la función responde “Telegram webhook is ready at /api; send updates with POST”.
-5. Define `BOT_TOKEN` en Vercel → Project → Settings → Environment Variables y vuelve a desplegar. Define también `TELEGRAM_WEBHOOK_SECRET` y usa ese mismo valor al registrar el webhook.
-6. Comprueba la configuración en Telegram usando `getWebhookInfo` con el token del bot: el campo `url` debe ser exactamente `https://TU-DOMINIO/api` y `last_error_message` debe estar vacío. Después envía `/start` al bot y revisa los registros de la función `/api` en Vercel; Telegram enviará un POST, no un GET.
-7. El endpoint confirma updates con HTTP 200 incluso si falla un manejador para evitar reintentos infinitos. Revisa los logs de Vercel para corregir errores de token, base de datos o permisos; HTTP 200 por sí solo no garantiza que el mensaje se haya procesado.
+Selecciona los entornos que uses (Production y Preview si aplica) y vuelve a desplegar cada vez que cambies variables.
 
-Si el webhook sigue sin llegar, vuelve a llamar a `setWebhook` con el mismo endpoint y `secret_token` exactamente igual a `TELEGRAM_WEBHOOK_SECRET` (sin espacios ni comillas extra) y confirma que desplegaste el commit más reciente en el dominio al que apunta ese webhook.
+## Webhook y autenticación
+Vercel sirve `api/index.py` en `/api`. Registra el webhook apuntando a `https://TU-DOMINIO/api` y pasa `secret_token` igual al valor de `TELEGRAM_WEBHOOK_SECRET`. La función compara ese valor con `X-Telegram-Bot-Api-Secret-Token`, usando comparación constante. No confíes únicamente en listas de IP: el secreto del webhook es el mecanismo diseñado para verificar la autenticidad de las solicitudes de Telegram y evita depender de rangos de IP variables.
 
-## Estado cuando aún no hay base de datos
-El webhook responde a `/start` y `/help` sin conexión a la base. Los comandos `/show_categories`, `/search`, `/register` y los comandos de administración avisan qué variables de base faltan en lugar de fallar sin respuesta. Para activar la tienda completa, configura `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_PORT` (opcional; predeterminado 5432) y `DB_DIALECT=postgresql`, y aplica las migraciones con Alembic.
+Comprueba `getWebhookInfo`: `url` debe ser exactamente la ruta del proyecto y `last_error_message` no debe tener error. Un GET a `/api` solo verifica salud; Telegram entrega mensajes por POST.
 
-## Limitación importante
-El proyecto original guarda estado de conversaciones en memoria; Vercel puede reciclar funciones entre llamadas. Esta adaptación sirve para pruebas y necesita persistencia de conversaciones/pedidos antes de aceptar compras reales. El propio repositorio declara que es una demo educativa no preparada para producción.
+## Supabase
+La URL PostgreSQL se arma con `SQLAlchemy URL.create`, para escapar de forma segura los caracteres de usuario y contraseña. Ejecuta `alembic upgrade head` contra la base externa antes de probar la tienda. La búsqueda y la migración de índice están adaptadas para PostgreSQL además de MySQL.
+
+## Comportamiento sin base configurada
+`/start` y `/help` pueden responder sin base de datos. Los comandos de tienda avisan si faltan variables de Supabase. Con base disponible, el endpoint invoca los handlers originales.
+
+## Limitaciones
+El proyecto fuente declara que es una demo educativa. Los estados de conversación se guardan en memoria y pueden perderse entre invocaciones serverless; persiste estados y pedidos antes de usar el bot para transacciones reales.
